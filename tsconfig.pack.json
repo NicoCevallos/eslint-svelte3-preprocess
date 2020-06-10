@@ -1,0 +1,6 @@
+{
+	"extends": "./node_modules/@agnostopia/core-dev/tsconfigs/tsconfig.pack.json",
+	"include": [
+		"./src/**/*.ts"
+	]
+}
