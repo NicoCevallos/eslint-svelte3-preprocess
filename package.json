@@ -1,6 +1,6 @@
 {
   "name": "eslint-svelte3-preprocess",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "svelte preprocess for eslint-plugin-svelte3",
   "main": "index.js",
   "scripts": {
