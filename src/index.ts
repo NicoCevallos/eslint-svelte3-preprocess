@@ -1,7 +1,7 @@
 import { PreprocessorGroup } from "svelte/types/compiler/preprocess";
 import { preprocess } from "svelte/compiler";
 import deasyncPromise from "deasync-promise";
-import tsParser from "@typescript-eslint/parser";
+import esTree from "@typescript-eslint/typescript-estree";
 
 interface Markup {
 	original: string;
@@ -51,10 +51,10 @@ const eslintSveltePreprocess = (
 						};
 					},
 					script: ({ content, attributes }) => {
-						const eslintRes = tsParser.parseForESLint(content, { loc: true });
+						const ast = esTree.parse(content, { loc: true });
 
 						const obj = {
-							ast: eslintRes.ast,
+							ast,
 							original: content,
 							ext: "ts",
 						};

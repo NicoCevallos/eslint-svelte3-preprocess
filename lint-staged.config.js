@@ -1,1 +1,3 @@
-module.exports = require("@agnostopia/core-dev").lintStaged;
+module.exports = {
+	"*.{cjs,js,ts,jsx,tsx}": ["eslint --fix"],
+};
