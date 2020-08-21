@@ -51,18 +51,28 @@ const eslintSveltePreprocess = (
 						};
 					},
 					script: ({ content, attributes }) => {
-						const ast = esTree.parse(content, { loc: true });
+						// Supported scenarios
+						// type="text/typescript"
+						// lang="typescript"
+						// lang="ts"
+						if (
+							attributes.lang === "ts" ||
+							attributes.lang === "typescript" ||
+							attributes.type === "text/typescript"
+						) {
+							const ast = esTree.parse(content, { loc: true });
 
-						const obj = {
-							ast,
-							original: content,
-							ext: "ts",
-						};
+							const obj = {
+								ast,
+								original: content,
+								ext: "ts",
+							};
 
-						if (attributes.context) {
-							module = obj;
-						} else {
-							instance = obj;
+							if (attributes.context) {
+								module = obj;
+							} else {
+								instance = obj;
+							}
 						}
 					},
 					style: ({ content }) => {
