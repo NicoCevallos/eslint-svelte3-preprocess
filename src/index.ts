@@ -1,121 +1,75 @@
-import { PreprocessorGroup } from "svelte/types/compiler/preprocess";
-import { preprocess } from "svelte/compiler";
-import deasyncPromise from "deasync-promise";
-import esTree from "@typescript-eslint/typescript-estree";
+import debug from "debug";
+import tty from "tty";
+import { SHARE_ENV, Worker } from "worker_threads";
+import { FileData, proprocessFunction, Result } from "./types";
+import workerFile from "./worker";
 
-interface Markup {
-	original: string;
-	result?: string;
-	diff?: number;
-}
+const debugMain = debug("eslint:svelte-preprocess:main");
 
-interface Script {
-	ast: unknown;
-	original: string;
-	ext: string;
-	result?: string;
-	diff?: number;
-}
-interface Style {
-	original: string;
-	result?: string;
-	diff?: number;
-}
+function eslintSveltePreprocess(svelteConfigPath?: string): proprocessFunction {
+	if (tty.isatty(process.stderr.fd)) {
+		process.env.DEBUG_COLORS = "true";
+	}
 
-interface Result {
-	module: Script;
-	instance: Script;
-	style: Style;
-}
+	const isRunningWithinCli = !process.argv.includes("--node-ipc");
+	const isDoneBuffer = new SharedArrayBuffer(4);
+	const isDoneView = new Int32Array(isDoneBuffer);
+	const dataBuffer = new SharedArrayBuffer(50 * 1024 * 1024);
+	const dataView = new Uint8Array(dataBuffer);
+	const dataLengthBuffer = new SharedArrayBuffer(4);
+	const dataLengthView = new Uint32Array(dataLengthBuffer);
+	const worker = new Worker(workerFile.path, {
+		env: SHARE_ENV,
+		workerData: {
+			isDoneView,
+			dataView,
+			dataLengthView,
+			svelteConfigPath,
+		},
+	});
 
-type proprocessFunction = (src: string, filename: string) => Result;
+	let lastResult: Result;
 
-const eslintSveltePreprocess = (
-	preprocessors:
-		| Readonly<PreprocessorGroup>
-		| ReadonlyArray<Readonly<PreprocessorGroup>>,
-): proprocessFunction => (src: string, filename: string): Result => {
-	let markup: Markup | undefined;
-	let module: Script | undefined;
-	let instance: Script | undefined;
-	let style: Style | undefined;
+	return (src: string, filename: string): Result => {
+		debugMain(`Asking worker to preprocess ${filename}`);
+		try {
+			worker.postMessage({
+				src,
+				filename,
+			} as FileData);
 
-	const res = deasyncPromise(
-		preprocess(
-			src,
-			[
-				{
-					markup: ({ content }) => {
-						markup = {
-							original: content,
-						};
-					},
-					script: ({ content, attributes }) => {
-						// Supported scenarios
-						// type="text/typescript"
-						// lang="typescript"
-						// lang="ts"
-						if (
-							attributes.lang === "ts" ||
-							attributes.lang === "typescript" ||
-							attributes.type === "text/typescript"
-						) {
-							const ast = esTree.parse(content, { loc: true });
+			debugMain("Locking thread to wait for worker");
 
-							const obj = {
-								ast,
-								original: content,
-								ext: "ts",
-							};
+			const waitResult = Atomics.wait(isDoneView, 0, 0, 5000);
+			Atomics.store(isDoneView, 0, 0);
+			debugMain(`Unlocked: ${waitResult}`);
+		} catch (error) {
+			debugMain(`error: ${error as string}`);
+		}
 
-							if (attributes.context) {
-								module = obj;
-							} else {
-								instance = obj;
-							}
-						}
-					},
-					style: ({ content }) => {
-						style = {
-							original: content,
-						};
-					},
-				},
-				...(Array.isArray(preprocessors) ? preprocessors : [preprocessors]),
-				{
-					markup: ({ content }) => {
-						if (markup) {
-							markup.result = content;
-							markup.diff = markup.original.length - content.length;
-						}
-					},
-					script: ({ content, attributes }) => {
-						const obj = attributes.context ? module : instance;
-						if (obj) {
-							obj.result = content;
-							obj.diff = obj.original.length - content.length;
-						}
-					},
-					style: ({ content }) => {
-						if (style) {
-							style.result = content;
-							style.diff = style.original.length - content.length;
-						}
-					},
-				},
-			],
-			{ filename: filename || "unknown" },
-		),
-	);
-
-	return {
-		...res,
-		module,
-		instance,
-		style,
-		markup,
+		try {
+			const textDecoder = new TextDecoder();
+			const decoded = textDecoder.decode(
+				dataView.subarray(0, dataLengthView[0]),
+			);
+			const result = JSON.parse(decoded);
+			debugMain("Finished");
+			lastResult = result;
+			return result;
+		} catch {
+			debugMain("No result obtained; finished with last result");
+			return lastResult;
+		} finally {
+			if (isRunningWithinCli) {
+				setTimeout(async () => {
+					debugMain("Terminating worker");
+					await worker.terminate();
+				});
+			}
+		}
 	};
-};
+}
 
 module.exports = eslintSveltePreprocess;
-export default eslintSveltePreprocess;
+
+export default module.exports;
